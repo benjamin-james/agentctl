@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
@@ -105,19 +106,32 @@ func fetchSHA256FromRelease(apiURL, archiveURL string) (string, error) {
 		return "", fmt.Errorf("parsing GitHub API response: %w", err)
 	}
 
+	archiveFilename := filepath.Base(archiveURL)
+	var fallback *gitHubAsset
 	for _, asset := range release.Assets {
 		if asset.BrowserDownloadURL == archiveURL {
-			if asset.Digest == "" {
-				return "", nil
-			}
-			if !strings.HasPrefix(asset.Digest, "sha256:") {
-				return "", fmt.Errorf("unexpected digest format %q for asset %q", asset.Digest, asset.Name)
-			}
-			return strings.TrimPrefix(asset.Digest, "sha256:"), nil
+			return parseDigest(asset)
+		}
+		if filepath.Base(asset.BrowserDownloadURL) == archiveFilename {
+			fallback = &asset
 		}
 	}
 
+	if fallback != nil {
+		return parseDigest(*fallback)
+	}
+
 	return "", fmt.Errorf("no matching asset found for %q in GitHub release", archiveURL)
+}
+
+func parseDigest(asset gitHubAsset) (string, error) {
+	if asset.Digest == "" {
+		return "", nil
+	}
+	if !strings.HasPrefix(asset.Digest, "sha256:") {
+		return "", fmt.Errorf("unexpected digest format %q for asset %q", asset.Digest, asset.Name)
+	}
+	return strings.TrimPrefix(asset.Digest, "sha256:"), nil
 }
 
 func ValidateURL(raw string) error {

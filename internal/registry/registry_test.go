@@ -304,3 +304,27 @@ func TestFetchSHA256FromReleaseHTTPError(t *testing.T) {
 		t.Fatal("expected error for HTTP 404")
 	}
 }
+
+func TestFetchSHA256FromReleaseRepoRename(t *testing.T) {
+	releaseResp := `{
+		"assets": [
+			{
+				"name": "goose-x86_64-unknown-linux-gnu.tar.bz2",
+				"browser_download_url": "https://github.com/aaif-goose/goose/releases/download/v1.36.0/goose-x86_64-unknown-linux-gnu.tar.bz2",
+				"digest": "sha256:aaaabbbbccccddddaaaabbbbccccddddaaaabbbbccccddddaaaabbbbccccdddd"
+			}
+		]
+	}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(releaseResp))
+	}))
+	defer server.Close()
+
+	sha256, err := fetchSHA256FromRelease(server.URL, "https://github.com/block/goose/releases/download/v1.36.0/goose-x86_64-unknown-linux-gnu.tar.bz2")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if sha256 != "aaaabbbbccccddddaaaabbbbccccddddaaaabbbbccccddddaaaabbbbccccdddd" {
+		t.Errorf("SHA256 = %q, want expected hash", sha256)
+	}
+}
