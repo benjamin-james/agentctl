@@ -1,7 +1,7 @@
 * agentctl
 [[https://raw.githubusercontent.com/benjamin-james/agentctl/refs/heads/badges/.badges/main/coverage.svg]]
 
-Tool that generates cloud-init YAML for agents using agent communication protocol (ACP).
+Tool that generates cloud-init YAML for auto-generating agentic virtual machines enabled with the agent communication protocol (ACP).
 Provide agent config/secrets, SSH key(s), optional packages, optional 9p file mount
 
 ** Install
@@ -9,12 +9,18 @@ Provide agent config/secrets, SSH key(s), optional packages, optional 9p file mo
   go install github.com/benjamin-james/agentctl@latest
 #+end_src
 
+Optionally, install this VM provisoning script [[https://github.com/benjamin-james/dotfiles/blob/master/bin/vm][vm]] wrapping `virt-install`:
+#+begin_src sh
+  wget https://raw.githubusercontent.com/benjamin-james/dotfiles/refs/heads/master/bin/vm
+  chmod u+x vm
+#+end_src
+
 ** Usage
 Here the cloud-init YAML is installed using a script [[https://github.com/benjamin-james/dotfiles/blob/master/bin/vm][vm]] wrapping =virt-install=
 *** opencode with a provided config file
 #+begin_src sh
   agentctl -a opencode -c ~/.config/opencode/opencode.json -k ~/.ssh/id_ed25519.pub -o ci_oc.yaml
-    LIBVIRT_DEFAULT_URI=qemu:///system vm create -n opencode -y ci_ocaml
+  LIBVIRT_DEFAULT_URI=qemu:///system vm create -n opencode -y ci_oc.yaml
 #+end_src
 *** codex with auth.json on remote server
 #+begin_src sh
@@ -26,3 +32,16 @@ Here the cloud-init YAML is installed using a script [[https://github.com/benjam
   agentctl -a goose -c ~/.config/goose/config.yaml ~/.ssh/id_ed25519.pub -o ci_goose.yaml --share-data
   LIBVIRT_DEFAULT_URI=qemu:///system vm create -n goose -y ci_goose.yaml
 #+end_src
+** Generating cloud-init ISO directly
+On some platforms like Mac OS X's UTM, a direct cdimage is necessary:
+#+begin_src sh
+  ### here, for example: ci_oc.yaml
+  VMNAME="my-vm-1"
+  CIYAML="ci_oc.yaml"
+  printf "instance-id: %s\nlocal-hostname: %s\n" "${VMNAME}" "${VMNAME}" > meta-data
+  xorriso -as mkisofs \
+  	-output "cloud-init.iso" \
+  	-volid CIDATA -joliet -rock \
+  	-graft-points "meta-data=meta-data" "user-data=$CIYAML"
+#+end_src
+
