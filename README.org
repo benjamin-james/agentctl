@@ -1,2 +1,28 @@
 * agentctl
 [[https://raw.githubusercontent.com/benjamin-james/agentctl/refs/heads/badges/.badges/main/coverage.svg]]
+
+Tool that generates cloud-init YAML for agents using agent communication protocol (ACP).
+Provide agent config/secrets, SSH key(s), optional packages, optional 9p file mount
+
+** Install
+#+begin_src sh
+  go install github.com/benjamin-james/agentctl@latest
+#+end_src
+
+** Usage
+Here the cloud-init YAML is installed using a script [[https://github.com/benjamin-james/dotfiles/blob/master/bin/vm][vm]] wrapping =virt-install=
+*** opencode with a provided config file
+#+begin_src sh
+  agentctl -a opencode -c ~/.config/opencode/opencode.json -k ~/.ssh/id_ed25519.pub -o ci_oc.yaml
+    LIBVIRT_DEFAULT_URI=qemu:///system vm create -n opencode -y ci_ocaml
+#+end_src
+*** codex with auth.json on remote server
+#+begin_src sh
+  agentctl -a codex -a ~/.codex/auth.json -k ~/.ssh/id_ed25519.pub -o ci_codex.yaml
+  LIBVIRT_DEFAULT_URI=qemu+ssh://muser@myserver/system vm create -n codex -y ci_codex.yaml
+#+end_src
+*** goose with sharing /data
+#+begin_src sh
+  agentctl -a goose -c ~/.config/goose/config.yaml ~/.ssh/id_ed25519.pub -o ci_goose.yaml --share-data
+  LIBVIRT_DEFAULT_URI=qemu:///system vm create -n goose -y ci_goose.yaml
+#+end_src
