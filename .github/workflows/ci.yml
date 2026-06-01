@@ -47,4 +47,4 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.24"
-      - uses: golangci/govulncheck-action@v1
+      - uses: golang/govulncheck-action@v1

@@ -214,7 +214,7 @@ func TestFetchSHA256FromRelease(t *testing.T) {
 		if r.Header.Get("Accept") != "application/vnd.github+json" {
 			t.Errorf("expected Accept header application/vnd.github+json, got %q", r.Header.Get("Accept"))
 		}
-		w.Write([]byte(releaseResp))
+		_, _ = w.Write([]byte(releaseResp))
 	}))
 	defer server.Close()
 
@@ -238,7 +238,7 @@ func TestFetchSHA256FromReleaseNoDigest(t *testing.T) {
 		]
 	}`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(releaseResp))
+		_, _ = w.Write([]byte(releaseResp))
 	}))
 	defer server.Close()
 
@@ -262,7 +262,7 @@ func TestFetchSHA256FromReleaseAssetNotFound(t *testing.T) {
 		]
 	}`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(releaseResp))
+		_, _ = w.Write([]byte(releaseResp))
 	}))
 	defer server.Close()
 
@@ -283,7 +283,7 @@ func TestFetchSHA256FromReleaseBadDigest(t *testing.T) {
 		]
 	}`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(releaseResp))
+		_, _ = w.Write([]byte(releaseResp))
 	}))
 	defer server.Close()
 

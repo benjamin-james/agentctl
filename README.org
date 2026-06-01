@@ -1,1 +1,2 @@
 * agentctl
+[[https://raw.githubusercontent.com/benjamin-james/agentctl/refs/heads/badges/.badges/main/coverage.svg]]
