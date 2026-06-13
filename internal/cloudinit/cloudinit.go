@@ -61,7 +61,7 @@ func BuildCloudConfig(opts CloudConfigOpts) (*CloudConfig, error) {
 		runcmd = append(runcmd, "systemctl daemon-reload")
 		runcmd = append(runcmd, "systemctl enable --now data.automount")
 	}
-	runcmd = append(runcmd, "chown -R agent:agent /data")
+	runcmd = append(runcmd, fmt.Sprintf("chown -R \"%s\":\"%s\" /data", opts.User, opts.User))
 	if err := validateBinary(opts.Agent.Binary); err != nil {
 		return nil, err
 	}
@@ -103,7 +103,9 @@ func BuildCloudConfig(opts CloudConfigOpts) (*CloudConfig, error) {
 		})
 		cfgdest := strings.Replace(opts.Agent.Agent.AcpConfig, "$HOME",
 			fmt.Sprintf("/home/%s", opts.User), 1)
-		runcmd = append(runcmd, fmt.Sprintf("install -D -m 644 -o \"%s\" -g \"%s\" /dev/shm/acp-config \"%s\"",
+		runcmd = append(runcmd, fmt.Sprintf("install -d -m 700 -o \"%s\" -g \"%s\" \"%s\"",
+			opts.User, opts.User, filepath.Dir(cfgdest)))
+		runcmd = append(runcmd, fmt.Sprintf("install -m 644 -o \"%s\" -g \"%s\" /dev/shm/acp-config \"%s\"",
 			opts.User, opts.User, cfgdest))
 		runcmd = append(runcmd, "rm -f /dev/shm/acp-config")
 
@@ -117,7 +119,10 @@ func BuildCloudConfig(opts CloudConfigOpts) (*CloudConfig, error) {
 			Owner:       "root:root",
 			Content:     opts.SecretsData,
 		})
-		runcmd = append(runcmd, fmt.Sprintf("install -D -m 600 -o \"%s\" -g \"%s\" /dev/shm/acp-secrets \"%s\"", opts.User, opts.User, secdest))
+		runcmd = append(runcmd, fmt.Sprintf("install -d -m 700 -o \"%s\" -g \"%s\" \"%s\"",
+			opts.User, opts.User, filepath.Dir(secdest)))
+		runcmd = append(runcmd, fmt.Sprintf("install -m 600 -o \"%s\" -g \"%s\" /dev/shm/acp-secrets \"%s\"",
+			opts.User, opts.User, secdest))
 		runcmd = append(runcmd, "rm -f /dev/shm/acp-secrets")
 	}
 	var mounts [][]string
