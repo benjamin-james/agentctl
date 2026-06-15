@@ -115,10 +115,10 @@ func (c *CLI) Validate() error {
 	}
 	if agentOK {
 		if c.SecretsFile == "" && c.requestedAgent.AcpSecretsRequired {
-			errs = append(errs, fmt.Errorf("secrets file is required for agent '%s'", c.Agent))
+			errs = append(errs, fmt.Errorf("-s/--secrets is required for agent '%s'", c.Agent))
 		}
 		if c.ConfigFile == "" && c.requestedAgent.AcpConfigRequired {
-			errs = append(errs, fmt.Errorf("config file is required for agent '%s'", c.Agent))
+			errs = append(errs, fmt.Errorf("-c/--config is required for agent '%s'", c.Agent))
 		}
 	}
 	if c.Output == "" {
