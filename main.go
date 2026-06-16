@@ -22,7 +22,7 @@ type CLI struct {
 	SecretsFile    string   `name:"secrets" short:"s" help:"Secrets file for the agent, like auth.json in Codex"`
 	SSHKey         []string `short:"k" help:"Path(s) to SSH public key files"`
 	SSHKeyString   []string `help:"Raw SSH public key string(s)"`
-	extraPackages  []string `help:"Extra packages to install"`
+	ExtraPackages  []string `short:"p" help:"Comman separated extra packages to install"`
 	ShareData      bool     `short:"d" help:"Whether to mount a 9p share as /data"`
 	sshKeys        []string
 	requestedAgent agent.Agent
@@ -30,9 +30,6 @@ type CLI struct {
 	secrets        string
 }
 
-func (c *CLI) ExtraPackages() []string {
-	return c.extraPackages
-}
 func (c *CLI) SSHKeys() []string {
 	return c.sshKeys
 }
@@ -160,7 +157,7 @@ func main() {
 		User:           cli.User,
 		Agent:          abin,
 		AuthorizedKeys: cli.SSHKeys(),
-		ExtraPackages:  cli.ExtraPackages(),
+		ExtraPackages:  cli.ExtraPackages,
 		ConfigData:     cli.Config(),
 		SecretsData:    cli.Secrets(),
 		ShareData:      cli.ShareData,
