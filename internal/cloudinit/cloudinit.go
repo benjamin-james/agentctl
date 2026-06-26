@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/benjamin-james/agentctl/internal/registry"
@@ -101,29 +102,18 @@ func BuildCloudConfig(opts CloudConfigOpts) (*CloudConfig, error) {
 			Owner:       "root:root",
 			Content:     opts.ConfigData,
 		})
-		cfgdest := strings.Replace(opts.Agent.Agent.AcpConfig, "$HOME",
-			fmt.Sprintf("/home/%s", opts.User), 1)
-		runcmd = append(runcmd, fmt.Sprintf("install -d -m 700 -o \"%s\" -g \"%s\" \"%s\"",
-			opts.User, opts.User, filepath.Dir(cfgdest)))
-		runcmd = append(runcmd, fmt.Sprintf("install -m 644 -o \"%s\" -g \"%s\" /dev/shm/acp-config \"%s\"",
-			opts.User, opts.User, cfgdest))
-		runcmd = append(runcmd, "rm -f /dev/shm/acp-config")
-
+		cfgcmd := InstallToDir(opts.Agent.Agent.AcpConfig, "/dev/shm/acp-config", opts.User, opts.User, 700, 644)
+		runcmd = append(runcmd, cfgcmd...)
 	}
 	if opts.SecretsData != "" && opts.Agent.Agent.AcpSecrets != "" {
-		secdest := strings.Replace(opts.Agent.Agent.AcpSecrets, "$HOME",
-			fmt.Sprintf("/home/%s", opts.User), 1)
 		writeFiles = append(writeFiles, WriteFile{
 			Path:        "/dev/shm/acp-secrets",
 			Permissions: "0600",
 			Owner:       "root:root",
 			Content:     opts.SecretsData,
 		})
-		runcmd = append(runcmd, fmt.Sprintf("install -d -m 700 -o \"%s\" -g \"%s\" \"%s\"",
-			opts.User, opts.User, filepath.Dir(secdest)))
-		runcmd = append(runcmd, fmt.Sprintf("install -m 600 -o \"%s\" -g \"%s\" /dev/shm/acp-secrets \"%s\"",
-			opts.User, opts.User, secdest))
-		runcmd = append(runcmd, "rm -f /dev/shm/acp-secrets")
+		seccmd := InstallToDir(opts.Agent.Agent.AcpSecrets, "/dev/shm/acp-secrets", opts.User, opts.User, 700, 600)
+		runcmd = append(runcmd, seccmd...)
 	}
 	var mounts [][]string
 	if opts.ShareData {
@@ -149,7 +139,18 @@ func BuildCloudConfig(opts CloudConfigOpts) (*CloudConfig, error) {
 		Mounts:     mounts,
 	}, nil
 }
-
+func InstallToDir(path_to, path_from, user, group string, dir_perm, file_perm int) []string {
+	home := filepath.Clean(fmt.Sprintf("/home/%s", user))
+	cmdList := make([]string, 0)
+	path_to = filepath.Clean(strings.Replace(path_to, "$HOME", home, 1))
+	cmdList = append(cmdList, fmt.Sprintf("rm -f \"%s\"", path_from))
+	cmdList = append(cmdList, fmt.Sprintf("install -m %d -o \"%s\" -g \"%s\" \"%s\" \"%s\"", file_perm, user, group, path_from, path_to))
+	for d := filepath.Clean(filepath.Dir(path_to)); filepath.Clean(d) != home; d = filepath.Clean(filepath.Dir(d)) {
+		cmdList = append(cmdList, fmt.Sprintf("install -d -m %d -o \"%s\" -g \"%s\" \"%s\"", dir_perm, user, group, d))
+	}
+	slices.Reverse(cmdList)
+	return cmdList
+}
 func GetInstaller(bin registry.RegistryPlatformBinary, sha256 string) (string, error) {
 	if bin.Cmd == "" {
 		return "", fmt.Errorf("empty command")
