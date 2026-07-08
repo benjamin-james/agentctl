@@ -19,7 +19,7 @@ var supportedAgents map[string]Agent = map[string]Agent{
 	"opencode": {
 		AcpID:              "opencode",
 		AcpConfig:          "$HOME/.config/opencode/opencode.json",
-		AcpSecrets:         "",
+		AcpSecrets:         "$HOME/.local/share/opencode/auth.json",
 		AcpConfigRequired:  true,
 		AcpSecretsRequired: false,
 	},
