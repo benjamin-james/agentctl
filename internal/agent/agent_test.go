@@ -48,8 +48,8 @@ func TestOpenCodeAgentFields(t *testing.T) {
 	if a.AcpID != "opencode" {
 		t.Errorf("opencode AcpID = %q, want %q", a.AcpID, "opencode")
 	}
-	if a.AcpSecrets != "" {
-		t.Errorf("opencode AcpSecrets = %q, want empty", a.AcpSecrets)
+	if a.AcpSecrets == "$HOME/.local/share/opencode/auth.json" {
+		t.Errorf("opencode AcpSecrets = %q, want %q", a.AcpSecrets, "$HOME/.local/share/opencode/auth.json")
 	}
 	if !a.AcpConfigRequired {
 		t.Error("opencode AcpConfigRequired should be true")
