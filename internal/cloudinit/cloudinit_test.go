@@ -1,357 +1,445 @@
 package cloudinit
 
 import (
-	"slices"
 	"strings"
 	"testing"
 
 	"github.com/benjamin-james/agentctl/internal/agent"
-	"github.com/benjamin-james/agentctl/internal/registry"
-
-	"go.yaml.in/yaml/v4"
+	"github.com/benjamin-james/agentctl/internal/dist"
 )
 
-func testResolvedAgent(user string, authorizedKeys []string, extraPackages []string, configData string, secretsData string, shareData bool) CloudConfigOpts {
-	return CloudConfigOpts{
-		User: user,
-		Agent: registry.ResolvedAgent{
-			Agent: agent.Agent{
-				AcpID:              "codex-acp",
-				AcpConfig:          "$HOME/.codex/config.toml",
-				AcpSecrets:         "$HOME/.codex/auth.json",
-				AcpConfigRequired:  false,
-				AcpSecretsRequired: true,
-			},
-			Binary: registry.RegistryPlatformBinary{
-				Archive: "https://example.com/codex.tar.gz",
-				Cmd:     "codex",
-				Args:    []string{"--serve"},
-			},
-		},
-		AuthorizedKeys: authorizedKeys,
-		ExtraPackages:  extraPackages,
-		ConfigData:     configData,
-		SecretsData:    secretsData,
-		ShareData:      shareData,
+// stubDist is unavailable as Distribution iface is closed.
+//
+//	So the closed-sum type is working as intended, and this woudl be the real ACPSteps
+func binStub() dist.Distribution {
+	return &dist.Binary{
+		Archive: "https://example.com/codex.tar.gz",
+		Cmd:     "codex",
+		Args:    []string{"--acp"},
+		Env:     map[string]string{"FOO": "bar"},
 	}
 }
 
-func TestBuildCloudConfigBasic(t *testing.T) {
-	cfg := testResolvedAgent("agent", []string{"ssh-rsa AAA key"},
-		nil, "", "", false)
-	cc, err := BuildCloudConfig(cfg)
+func npxStub() dist.Distribution {
+	return &dist.Npx{
+		Package: "@scope/codex@1.0",
+		Args:    []string{"--acp"},
+		Env:     map[string]string{"FOO": "bar"},
+	}
+}
+
+func TestBasePackages(t *testing.T) {
+	ci := &CloudConfig{}
+	// npxStub contributes nodejs/npm as dist extras.
+	if err := BasePackages([]string{"vim"}, npxStub())(ci); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	wantContains := []string{"vim", "qemu-guest-agent", "ca-certificates", "rsync", "nodejs", "npm"}
+	for _, w := range wantContains {
+		if !contains(ci.Packages, w) {
+			t.Errorf("packages missing %q, got %v", w, ci.Packages)
+		}
+	}
+	// extras must precede base, base must precede dist extras.
+	if !before(ci.Packages, "vim", "qemu-guest-agent") {
+		t.Errorf("extras should precede base: %v", ci.Packages)
+	}
+	if !before(ci.Packages, "rsync", "nodejs") {
+		t.Errorf("base should precede dist extras: %v", ci.Packages)
+	}
+}
+
+func TestBasePackagesBinaryHasNoExtraPackages(t *testing.T) {
+	ci := &CloudConfig{}
+	if err := BasePackages(nil, binStub())(ci); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if contains(ci.Packages, "nodejs") || contains(ci.Packages, "npm") {
+		t.Errorf("binary dist should not add nodejs/npm: %v", ci.Packages)
+	}
+}
+
+func TestBasePackagesNpxAddsNodePackages(t *testing.T) {
+	ci := &CloudConfig{}
+	if err := BasePackages(nil, npxStub())(ci); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !contains(ci.Packages, "nodejs") || !contains(ci.Packages, "npm") {
+		t.Errorf("npx dist should add nodejs/npm: %v", ci.Packages)
+	}
+}
+
+func TestUserStep(t *testing.T) {
+	ci := &CloudConfig{}
+	keys := []string{"ssh-rsa AAA key"}
+	if err := UserStep("agent", keys)(ci); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(ci.Users) != 1 {
+		t.Fatalf("Users len = %d", len(ci.Users))
+	}
+	u := ci.Users[0]
+	if u.Name != "agent" || u.Shell != "/bin/bash" || u.HomeDir != "/home/agent" {
+		t.Errorf("user = %+v", u)
+	}
+	if !contains(u.Groups, "sudo") {
+		t.Errorf("Groups = %v, want sudo", u.Groups)
+	}
+	if !contains(u.Sudo, "ALL=(ALL) NOPASSWD:ALL") {
+		t.Errorf("Sudo = %v", u.Sudo)
+	}
+	if len(u.AuthorizedKeys) != 1 || u.AuthorizedKeys[0] != keys[0] {
+		t.Errorf("AuthorizedKeys = %v", u.AuthorizedKeys)
+	}
+	if !u.LockPasswd {
+		t.Error("LockPasswd should be true when keys supplied")
+	}
+}
+
+func TestUserStepNoKeysUnlocksPasswd(t *testing.T) {
+	ci := &CloudConfig{}
+	if err := UserStep("agent", nil)(ci); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ci.Users[0].LockPasswd {
+		t.Error("LockPasswd should be false when no keys supplied")
+	}
+}
+
+func TestACPStepWritesInstallerAndRunner(t *testing.T) {
+	ci := &CloudConfig{}
+	d := binStub()
+	wantInstaller, _ := d.Installer()
+	wantRunner, _ := d.Runner()
+	if err := ACPStep(d)(ci); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	installer := findWriteFile(ci, "/usr/local/sbin/install-acp")
+	if installer == nil {
+		t.Fatal("missing install-acp write file")
+	}
+	if installer.Content != wantInstaller {
+		t.Errorf("installer content mismatch: got %q want %q", installer.Content, wantInstaller)
+	}
+	if installer.Permissions != "0755" || installer.Owner != "root:root" {
+		t.Errorf("installer perms/owner = %q/%q", installer.Permissions, installer.Owner)
+	}
+	runner := findWriteFile(ci, "/usr/local/bin/acp-run")
+	if runner == nil {
+		t.Fatal("missing acp-run write file")
+	}
+	if runner.Content != wantRunner {
+		t.Errorf("runner content mismatch: got %q want %q", runner.Content, wantRunner)
+	}
+	if !contains(ci.RunCmd, "/usr/local/sbin/install-acp") {
+		t.Errorf("runcmd should include install-acp: %v", ci.RunCmd)
+	}
+}
+
+func TestACPStepRealBinary(t *testing.T) {
+	ci := &CloudConfig{}
+	if err := ACPStep(binStub())(ci); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	installer := findWriteFile(ci, "/usr/local/sbin/install-acp").Content
+	if !strings.Contains(installer, "wget") || !strings.Contains(installer, "find") {
+		t.Errorf("binary installer should wget+find:\n%s", installer)
+	}
+	runner := findWriteFile(ci, "/usr/local/bin/acp-run").Content
+	if !strings.Contains(runner, "exec codex '--acp'") {
+		t.Errorf("binary runner should exec codex:\n%s", runner)
+	}
+}
+
+func TestACPStepRealNpx(t *testing.T) {
+	ci := &CloudConfig{}
+	if err := ACPStep(npxStub())(ci); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	installer := findWriteFile(ci, "/usr/local/sbin/install-acp").Content
+	if !strings.Contains(installer, "npm install -g @scope/codex@1.0") {
+		t.Errorf("npx installer should npm install -g:\n%s", installer)
+	}
+	if strings.Contains(installer, "wget") {
+		t.Errorf("npx installer must not wget:\n%s", installer)
+	}
+	runner := findWriteFile(ci, "/usr/local/bin/acp-run").Content
+	if !strings.Contains(runner, "exec npx '@scope/codex@1.0' '--acp'") {
+		t.Errorf("npx runner should exec npx with package spec:\n%s", runner)
+	}
+	if !strings.Contains(runner, "export FOO='bar'") {
+		t.Errorf("npx runner should export env:\n%s", runner)
+	}
+}
+
+func TestACPStepInvalidDistribution(t *testing.T) {
+	ci := &CloudConfig{}
+	bad := &dist.Binary{Archive: "", Cmd: "x"}
+	if err := ACPStep(bad)(ci); err == nil {
+		t.Fatal("expected error from invalid distribution")
+	}
+}
+
+func TestDataDirStepNoShare(t *testing.T) {
+	ci := &CloudConfig{}
+	if err := DataDirStep("agent", false)(ci); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !contains(ci.RunCmd, "mkdir -p /data") {
+		t.Errorf("runcmd missing mkdir: %v", ci.RunCmd)
+	}
+	if !contains(ci.RunCmd, `chown -R "agent":"agent" /data`) {
+		t.Errorf("runcmd missing chown: %v", ci.RunCmd)
+	}
+	if findWriteFile(ci, "/etc/modules-load.d/9p.conf") != nil {
+		t.Error("9p conf should not be written when share=false")
+	}
+	if ci.Mounts != nil {
+		t.Errorf("Mounts should be nil when share=false, got %v", ci.Mounts)
+	}
+}
+
+func TestDataDirStepWithShare(t *testing.T) {
+	ci := &CloudConfig{}
+	if err := DataDirStep("agent", true)(ci); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	conf := findWriteFile(ci, "/etc/modules-load.d/9p.conf")
+	if conf == nil {
+		t.Fatal("missing 9p.conf write file")
+	}
+	if conf.Content != "9p\n9pnet\n9pnet_virtio" {
+		t.Errorf("9p.conf content = %q", conf.Content)
+	}
+	// runcmd order: mkdir, daemon-reload, enable automount, chown
+	wantOrder := []string{"mkdir -p /data", "systemctl daemon-reload", "systemctl enable --now data.automount", `chown -R "agent":"agent" /data`}
+	for i, w := range wantOrder {
+		idx := indexOf(ci.RunCmd, w)
+		if idx < 0 {
+			t.Errorf("runcmd missing %q: %v", w, ci.RunCmd)
+			continue
+		}
+		if i > 0 {
+			prev := indexOf(ci.RunCmd, wantOrder[i-1])
+			if idx < prev {
+				t.Errorf("runcmd order wrong: %q before %q: %v", w, wantOrder[i-1], ci.RunCmd)
+			}
+		}
+	}
+	if len(ci.Mounts) != 1 || ci.Mounts[0][1] != "/data/" {
+		t.Errorf("Mounts = %v", ci.Mounts)
+	}
+}
+
+func TestStageConfig(t *testing.T) {
+	ci := &CloudConfig{}
+	if err := StageConfig("$HOME/.codex/config.toml", "CONFIGDATA", "agent")(ci); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	staged := findWriteFile(ci, "/dev/shm/acp-config")
+	if staged == nil {
+		t.Fatal("missing staged config write file")
+	}
+	if staged.Permissions != "0644" || staged.Content != "CONFIGDATA" {
+		t.Errorf("staged config = %+v", staged)
+	}
+	// runcmd should install into /home/agent/.codex/config.toml
+	joined := strings.Join(ci.RunCmd, "\n")
+	if !strings.Contains(joined, "/home/agent/.codex/config.toml") {
+		t.Errorf("runcmd should install to expanded config path:\n%s", joined)
+	}
+	if !strings.Contains(joined, "install -m 644") {
+		t.Errorf("runcmd should install with 644 perms:\n%s", joined)
+	}
+	// should create the .codex directory
+	if !strings.Contains(joined, "install -d -m 700") {
+		t.Errorf("runcmd should create parent dirs with 700:\n%s", joined)
+	}
+}
+
+func TestStageSecrets(t *testing.T) {
+	ci := &CloudConfig{}
+	if err := StageSecrets("$HOME/.codex/auth.json", "SECRETS", "agent")(ci); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	staged := findWriteFile(ci, "/dev/shm/acp-secrets")
+	if staged == nil {
+		t.Fatal("missing staged secrets write file")
+	}
+	if staged.Permissions != "0600" {
+		t.Errorf("secrets perms = %q, want 0600", staged.Permissions)
+	}
+	joined := strings.Join(ci.RunCmd, "\n")
+	if !strings.Contains(joined, "install -m 600") {
+		t.Errorf("runcmd should install secrets with 600 perms:\n%s", joined)
+	}
+}
+
+func TestInstallToDirOrder(t *testing.T) {
+	cmds := InstallToDir("$HOME/.codex/config.toml", "/dev/shm/acp-config", "agent", "agent", 0700, 0644)
+	// Expected order: create /home/agent/.codex (700), install file (644), rm staging.
+	if len(cmds) != 3 {
+		t.Fatalf("cmds len = %d, want 3: %v", len(cmds), cmds)
+	}
+	if !strings.Contains(cmds[0], "install -d -m 700") || !strings.Contains(cmds[0], "/home/agent/.codex") {
+		t.Errorf("first cmd should mkdir .codex: %q", cmds[0])
+	}
+	if !strings.Contains(cmds[1], "install -m 644") {
+		t.Errorf("second cmd should install file: %q", cmds[1])
+	}
+	if !strings.HasPrefix(cmds[2], "rm -f") {
+		t.Errorf("third cmd should rm staging: %q", cmds[2])
+	}
+}
+
+func TestInstallToDirDeepNesting(t *testing.T) {
+	cmds := InstallToDir("$HOME/a/b/c/file", "/dev/shm/x", "agent", "agent", 0700, 0644)
+	// Should create /home/agent/a, /home/agent/a/b, /home/agent/a/b/c (3 mkdirs),
+	// then install, then rm = 5 cmds.
+	if len(cmds) != 5 {
+		t.Fatalf("cmds len = %d, want 5: %v", len(cmds), cmds)
+	}
+}
+
+func TestBuildBinaryIntegration(t *testing.T) {
+	opts := Options{
+		User:           "agent",
+		Agent:          agent.Agent{AcpID: "codex-acp", AcpConfig: "$HOME/.codex/config.toml", AcpSecrets: "$HOME/.codex/auth.json", AcpSecretsRequired: true},
+		Dist:           binStub(),
+		AuthorizedKeys: []string{"ssh-rsa AAA key"},
+		SecretsData:    "AUTHJSON",
+	}
+	cc, err := Build(opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !cc.PackageUpdate {
 		t.Error("PackageUpdate should be true")
 	}
-	if len(cc.Users) != 1 {
-		t.Fatalf("Users len = %d, want 1", len(cc.Users))
+	if !contains(cc.Packages, "rsync") {
+		t.Errorf("packages missing rsync: %v", cc.Packages)
 	}
-	if cc.Users[0].Name != "agent" {
-		t.Errorf("User Name = %q, want %q", cc.Users[0].Name, "agent")
+	if contains(cc.Packages, "nodejs") {
+		t.Errorf("binary build should not add nodejs: %v", cc.Packages)
 	}
-	if cc.Users[0].Shell != "/bin/bash" {
-		t.Errorf("User Shell = %q, want /bin/bash", cc.Users[0].Shell)
+	if len(cc.Users) != 1 || cc.Users[0].Name != "agent" {
+		t.Errorf("Users = %+v", cc.Users)
 	}
-	if len(cc.Users[0].AuthorizedKeys) != 1 {
-		t.Errorf("AuthorizedKeys len = %d, want 1", len(cc.Users[0].AuthorizedKeys))
+	if findWriteFile(cc, "/usr/local/sbin/install-acp") == nil || findWriteFile(cc, "/usr/local/bin/acp-run") == nil {
+		t.Error("missing install-acp or acp-run write files")
 	}
-	if !cc.Users[0].LockPasswd {
-		t.Error("LockPasswd should be true when keys are provided")
+	// runcmd order: install-acp, mkdir, chown, secrets-install
+	if indexOf(cc.RunCmd, "/usr/local/sbin/install-acp") != 0 {
+		t.Errorf("install-acp should be first runcmd: %v", cc.RunCmd)
 	}
-}
-
-func TestBuildCloudConfigWithConfig(t *testing.T) {
-	cfg := testResolvedAgent("agent", []string{"ssh-rsa AAA key"}, nil,
-		"config-data", "", false)
-	cc, err := BuildCloudConfig(cfg)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if !before(cc.RunCmd, "mkdir -p /data", `chown -R "agent":"agent" /data`) {
+		t.Errorf("mkdir should precede chown: %v", cc.RunCmd)
 	}
-	found := false
-	for _, wf := range cc.WriteFiles {
-		if wf.Path == "/dev/shm/acp-config" {
-			found = true
-			if wf.Content != "config-data" {
-				t.Errorf("config content = %q, want %q", wf.Content, "config-data")
-			}
-		}
-	}
-	if !found {
-		t.Error("expected /dev/shm/acp-config write file entry")
-	}
-	hasConfigInstall := false
-	for _, cmd := range cc.RunCmd {
-		if strings.Contains(cmd, "acp-config") && strings.Contains(cmd, "install") {
-			hasConfigInstall = true
-		}
-	}
-	if !hasConfigInstall {
-		t.Error("expected runcmd to install acp-config")
+	if findWriteFile(cc, "/dev/shm/acp-secrets") == nil {
+		t.Error("missing staged secrets")
 	}
 }
 
-func TestBuildCloudConfigWithSecrets(t *testing.T) {
-	cfg := testResolvedAgent("agent", []string{"ssh-rsa AAA key"}, nil, "", "secret-data", false)
-	cc, err := BuildCloudConfig(cfg)
+func TestBuildNpxIntegration(t *testing.T) {
+	opts := Options{
+		User:           "agent",
+		Agent:          agent.Agent{AcpID: "codex-acp", AcpConfig: "$HOME/.codex/config.toml"},
+		Dist:           npxStub(),
+		AuthorizedKeys: []string{"ssh-rsa AAA key"},
+		ConfigData:     "CONFIGTOML",
+		ShareData:      true,
+	}
+	cc, err := Build(opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	found := false
-	for _, wf := range cc.WriteFiles {
-		if wf.Path == "/dev/shm/acp-secrets" {
-			found = true
-			if wf.Permissions != "0600" {
-				t.Errorf("secrets permissions = %q, want %q", wf.Permissions, "0600")
-			}
-		}
+	if !contains(cc.Packages, "nodejs") || !contains(cc.Packages, "npm") {
+		t.Errorf("npx build should add nodejs/npm: %v", cc.Packages)
 	}
-	if !found {
-		t.Error("expected /dev/shm/acp-secrets write file entry")
-	}
-}
-
-func TestBuildCloudConfigWithShareData(t *testing.T) {
-	cfg := testResolvedAgent("agent", []string{"ssh-rsa AAA key"}, nil, "", "", true)
-	cc, err := BuildCloudConfig(cfg)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if findWriteFile(cc, "/etc/modules-load.d/9p.conf") == nil {
+		t.Error("share build should write 9p.conf")
 	}
 	if len(cc.Mounts) != 1 {
-		t.Fatalf("Mounts len = %d, want 1", len(cc.Mounts))
+		t.Errorf("Mounts = %v", cc.Mounts)
 	}
-	if cc.Mounts[0][1] != "/data/" {
-		t.Errorf("mount target = %q, want /data/", cc.Mounts[0][1])
-	}
-	hasDaemonreload := slices.Contains(cc.RunCmd, "systemctl daemon-reload")
-	hasAutomount := slices.Contains(cc.RunCmd, "systemctl enable --now data.automount")
-	if !hasDaemonreload {
-		t.Error("Must reload systemctl to discover automount if sharing 9p data")
-	}
-	if !hasAutomount {
-		t.Error("Must automount if sharing 9p data")
-	}
-	has9pModule := false
-	for _, wf := range cc.WriteFiles {
-		if wf.Path == "/etc/modules-load.d/9p.conf" {
-			has9pModule = true
-		}
-	}
-	if !has9pModule {
-		t.Error("expected 9p modules config file when shareData is true")
+	if findWriteFile(cc, "/dev/shm/acp-config") == nil {
+		t.Error("missing staged config")
 	}
 }
 
-func TestBuildCloudConfigNoShareData(t *testing.T) {
-	cfg := testResolvedAgent("agent", []string{"ssh-rsa AAA key"}, nil, "", "", false)
-	cc, err := BuildCloudConfig(cfg)
+func TestBuildInvalidUsername(t *testing.T) {
+	opts := Options{User: "1bad", Dist: binStub()}
+	if _, err := Build(opts); err == nil {
+		t.Fatal("expected error for invalid username")
+	}
+}
+
+func TestBuildNilDistribution(t *testing.T) {
+	opts := Options{User: "agent"}
+	if _, err := Build(opts); err == nil {
+		t.Fatal("expected error for nil distribution")
+	}
+}
+
+func TestBuildNoConfigNoSecrets(t *testing.T) {
+	opts := Options{
+		User:           "agent",
+		Agent:          agent.Agent{AcpID: "x"},
+		Dist:           binStub(),
+		AuthorizedKeys: []string{"ssh-rsa AAA key"},
+	}
+	cc, err := Build(opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(cc.Mounts) != 0 {
-		t.Errorf("Mounts len = %d, want 0", len(cc.Mounts))
-	}
-	hasAutomount := slices.Contains(cc.RunCmd, "systemctl enable --now data.automount")
-	if hasAutomount {
-		t.Error("Cannot automount if not sharing 9p data")
-	}
-	for _, wf := range cc.WriteFiles {
-		if wf.Path == "/etc/modules-load.d/9p.conf" {
-			t.Error("Shouldn't have 9p modules installed if not sharing data")
-		}
+	if findWriteFile(cc, "/dev/shm/acp-config") != nil || findWriteFile(cc, "/dev/shm/acp-secrets") != nil {
+		t.Error("no staging files should be written when no config/secrets supplied")
 	}
 }
 
-func TestBuildCloudConfigNoKeysUnlocksPasswd(t *testing.T) {
-	cfg := testResolvedAgent("agent", nil, nil, "", "", false)
-	cc, err := BuildCloudConfig(cfg)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if cc.Users[0].LockPasswd {
-		t.Error("LockPasswd should be false when no keys provided")
-	}
-}
-
-func TestGetInstallerTarGz(t *testing.T) {
-	bin := registry.RegistryPlatformBinary{
-		Archive: "https://example.com/codex.tar.gz",
-		Cmd:     "codex",
-	}
-	script, err := GetInstaller(bin, "")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(script, "#!/usr/bin/env bash") {
-		t.Error("installer should start with bash shebang")
-	}
-	if !strings.Contains(script, "tar -xzf") {
-		t.Error("installer should use tar -xzf for .tar.gz")
-	}
-	if !strings.Contains(script, "wget") {
-		t.Error("installer should use wget")
-	}
-	if !strings.Contains(script, "codex.tar.gz") {
-		t.Error("installer should reference archive filename")
-	}
-}
-
-func TestGetInstallerTarBz2(t *testing.T) {
-	bin := registry.RegistryPlatformBinary{
-		Archive: "https://example.com/codex.tar.bz2",
-		Cmd:     "codex",
-	}
-	script, err := GetInstaller(bin, "")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(script, "tar -xjf") {
-		t.Error("installer should use tar -xjf for .tar.bz2")
-	}
-}
-
-func TestGetInstallerInvalidFormat(t *testing.T) {
-	bin := registry.RegistryPlatformBinary{
-		Archive: "https://example.com/codex.zip",
-		Cmd:     "codex",
-	}
-	_, err := GetInstaller(bin, "")
-	if err == nil {
-		t.Fatal("expected error for invalid archive format")
-	}
-}
-
-func TestGetInstallerEmptyCmd(t *testing.T) {
-	bin := registry.RegistryPlatformBinary{
-		Archive: "https://example.com/codex.tar.gz",
-		Cmd:     "",
-	}
-	_, err := GetInstaller(bin, "")
-	if err == nil {
-		t.Fatal("expected error for empty Cmd")
-	}
-}
-
-func TestGetInstallerWithSHA256(t *testing.T) {
-	bin := registry.RegistryPlatformBinary{
-		Archive: "https://example.com/codex.tar.gz",
-		Cmd:     "codex",
-	}
-	sha256 := "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
-	script, err := GetInstaller(bin, sha256)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(script, "sha256sum -c -") {
-		t.Error("installer should include sha256sum check when SHA256 is provided")
-	}
-	if !strings.Contains(script, sha256) {
-		t.Error("installer should include the SHA256 hash in the check")
-	}
-}
-
-func TestGetInstallerWithoutSHA256(t *testing.T) {
-	bin := registry.RegistryPlatformBinary{
-		Archive: "https://example.com/codex.tar.gz",
-		Cmd:     "codex",
-	}
-	script, err := GetInstaller(bin, "")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if strings.Contains(script, "sha256sum") {
-		t.Error("installer should not include sha256sum check when SHA256 is empty")
-	}
-}
-
-func TestGetAcpRun(t *testing.T) {
-	bin := registry.RegistryPlatformBinary{
-		Cmd:  "/usr/local/bin/codex",
-		Args: []string{"--serve", "--port", "8080"},
-	}
-	script := GetAcpRun(bin)
-	if !strings.Contains(script, "#!/usr/bin/env bash") {
-		t.Error("acp-run should start with bash shebang")
-	}
-	if !strings.Contains(script, "codex --serve --port 8080") {
-		t.Errorf("acp-run should contain command with args, got: %s", script)
-	}
-	if !strings.Contains(script, "ACP_WORKDIR") {
-		t.Error("acp-run should reference ACP_WORKDIR")
-	}
-}
-
-func TestGetAcpRunNoArgs(t *testing.T) {
-	bin := registry.RegistryPlatformBinary{
-		Cmd:  "myagent",
-		Args: nil,
-	}
-	script := GetAcpRun(bin)
-	if !strings.Contains(script, "myagent") {
-		t.Error("acp-run should contain command name")
-	}
-}
-
-func TestMarshalCloudConfig(t *testing.T) {
-	cc := CloudConfig{
+func TestMarshal(t *testing.T) {
+	cc := &CloudConfig{
 		PackageUpdate: true,
-		Packages:      []string{"wget"},
-		Users: []CloudUser{
-			{
-				Name:   "agent",
-				Shell:  "/bin/bash",
-				Groups: []string{"sudo"},
-			},
-		},
+		Packages:      []string{"rsync"},
+		Users:         []User{{Name: "agent", Shell: "/bin/bash"}},
 	}
-	out, err := MarshalCloudConfig(cc)
+	out, err := Marshal(cc)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !strings.HasPrefix(out, "#cloud-config\n") {
-		t.Error("output should start with #cloud-config header")
+		t.Errorf("output must start with #cloud-config magic, got: %q", out[:min(20, len(out))])
 	}
-	var parsed CloudConfig
-	if err := yaml.Unmarshal([]byte(out[len("#cloud-config\n"):]), &parsed); err != nil {
-		t.Fatalf("output should be valid YAML: %v", err)
+	if !strings.Contains(out, "package_update: true") {
+		t.Errorf("output missing package_update: %s", out)
 	}
-	if !parsed.PackageUpdate {
-		t.Error("parsed PackageUpdate should be true")
-	}
-	if len(parsed.Packages) != 1 || parsed.Packages[0] != "wget" {
-		t.Errorf("parsed Packages = %v", parsed.Packages)
+	if !strings.Contains(out, "rsync") {
+		t.Errorf("output missing rsync: %s", out)
 	}
 }
 
-func TestBuildCloudConfigWithConfigAndSecrets(t *testing.T) {
-	cfg := testResolvedAgent("myuser", []string{"ssh-rsa AAA key"}, nil, "cfgdata", "secdata", false)
-	cc, err := BuildCloudConfig(cfg)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	hasCfg := false
-	hasSec := false
-	for _, wf := range cc.WriteFiles {
-		if wf.Path == "/dev/shm/acp-config" {
-			hasCfg = true
-		}
-		if wf.Path == "/dev/shm/acp-secrets" {
-			hasSec = true
+func contains(slice []string, s string) bool {
+	return indexOf(slice, s) >= 0
+}
+
+func indexOf(slice []string, s string) int {
+	for i, v := range slice {
+		if v == s {
+			return i
 		}
 	}
-	if !hasCfg {
-		t.Error("expected config write file")
-	}
-	if !hasSec {
-		t.Error("expected secrets write file")
-	}
-	for _, cmd := range cc.RunCmd {
-		if strings.Contains(cmd, "install") && strings.Contains(cmd, "acp-config") {
-			if !strings.Contains(cmd, "/home/myuser") {
-				t.Errorf("config install should use /home/myuser, got: %s", cmd)
-			}
+	return -1
+}
+
+func before(slice []string, a, b string) bool {
+	return indexOf(slice, a) >= 0 && indexOf(slice, b) >= 0 && indexOf(slice, a) < indexOf(slice, b)
+}
+
+func findWriteFile(ci *CloudConfig, path string) *WriteFile {
+	for i := range ci.WriteFiles {
+		if ci.WriteFiles[i].Path == path {
+			return &ci.WriteFiles[i]
 		}
 	}
+	return nil
 }

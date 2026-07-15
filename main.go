@@ -1,3 +1,7 @@
+// Command agentctl generates a cloud-init user-data YAML file for an ACP-enabled
+// agentic VM. It resolves the requested agent's distribution from the ACP
+// registry (binary preferred, npx fallback), then composes a cloud-config from
+// composable steps.
 package main
 
 import (
@@ -10,50 +14,33 @@ import (
 	"github.com/alecthomas/kong"
 	"github.com/benjamin-james/agentctl/internal/agent"
 	"github.com/benjamin-james/agentctl/internal/cloudinit"
-	"github.com/benjamin-james/agentctl/internal/registry"
+	"github.com/benjamin-james/agentctl/internal/dist"
 )
 
+// CLI holds cmdline flags. Unexported fields are filled by Validate.
 type CLI struct {
-	Agent          string   `required:"" short:"a" help:"Agent type"`
-	ConfigFile     string   `name:"config" short:"c" help:"Path to config file"`
-	Output         string   `required:"" short:"o" help:"Output CI yaml file path (parent directory must be writable)"`
-	RegistryUrl    string   `default:"https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json" short:"r" help:"URL for ACP registry"`
-	User           string   `default:"agent" short:"u" help:"Username of VM"`
-	SecretsFile    string   `name:"secrets" short:"s" help:"Secrets file for the agent, like auth.json in Codex"`
-	SSHKey         []string `short:"k" help:"Path(s) to SSH public key files"`
-	SSHKeyString   []string `help:"Raw SSH public key string(s)"`
-	ExtraPackages  []string `short:"p" help:"Comman separated extra packages to install"`
-	ShareData      bool     `short:"d" help:"Whether to mount a 9p share as /data"`
+	Agent         string   `required:"" short:"a" help:"Agent type"`
+	ConfigFile    string   `name:"config" short:"c" help:"Path to config file"`
+	Output        string   `required:"" short:"o" help:"Output cloud-init YAML file path (parent directory must be writable)"`
+	RegistryURL   string   `default:"https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json" short:"r" help:"URL for ACP registry"`
+	User          string   `default:"agent" short:"u" help:"Username of VM"`
+	SecretsFile   string   `name:"secrets" short:"s" help:"Secrets file for the agent, like auth.json in Codex"`
+	SSHKey        []string `short:"k" help:"Path(s) to SSH public key files"`
+	SSHKeyString  []string `help:"Raw SSH public key string(s)"`
+	ExtraPackages []string `short:"p" help:"Comma-separated extra packages to install"`
+	ShareData     bool     `short:"d" help:"Whether to mount a 9p share as /data"`
+
 	sshKeys        []string
 	requestedAgent agent.Agent
 	config         string
 	secrets        string
 }
 
-func (c *CLI) SSHKeys() []string {
-	return c.sshKeys
-}
-func (c *CLI) Secrets() string {
-	return c.secrets
-}
-func (c *CLI) Config() string {
-	return c.config
-}
-func validName(s string, maxLen int) bool {
-	if len(s) == 0 || len(s) > maxLen {
-		return false
-	}
-	for i, r := range s {
-		ok := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
-		if i > 0 {
-			ok = ok || (r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.'
-		}
-		if !ok {
-			return false
-		}
-	}
-	return true
-}
+// we love getters don't we
+func (c *CLI) SSHKeys() []string           { return c.sshKeys }
+func (c *CLI) Config() string              { return c.config }
+func (c *CLI) Secrets() string             { return c.secrets }
+func (c *CLI) RequestedAgent() agent.Agent { return c.requestedAgent }
 
 func (c *CLI) resolveSSHKeys() error {
 	var keys []string
@@ -72,11 +59,13 @@ func (c *CLI) resolveSSHKeys() error {
 	return nil
 }
 
+// Populates unexported, resolved fields.
+// Collects all errors via Join rather than failing on first.
 func (c *CLI) Validate() error {
 	var errs []error
 
-	if !validName(c.User, 32) {
-		errs = append(errs, fmt.Errorf("name '%s' must follow the regex [a-zA-Z][a-zA-Z0-9_.-]{0,31}", c.User))
+	if err := dist.CheckUsername(c.User); err != nil {
+		errs = append(errs, err)
 	}
 	var agentOK bool
 	if c.Agent == "" {
@@ -108,7 +97,6 @@ func (c *CLI) Validate() error {
 		} else {
 			c.secrets = string(content)
 		}
-
 	}
 	if agentOK {
 		if c.SecretsFile == "" && c.requestedAgent.AcpSecretsRequired {
@@ -134,7 +122,7 @@ func (c *CLI) Validate() error {
 			errs = append(errs, fmt.Errorf("failed to remove temp file %q: %w", name, err))
 		}
 	}
-	if err := registry.ValidateURL(c.RegistryUrl); err != nil {
+	if err := dist.ValidateURL(c.RegistryURL); err != nil {
 		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
@@ -142,40 +130,41 @@ func (c *CLI) Validate() error {
 
 func main() {
 	cli := new(CLI)
+	// kong.Parse auto-invokes cli.Validate() (kong's Validator hook) after
+	// decoding flags; on validation error it prints usage and exits.
 	kong.Parse(cli)
-	rd, err := registry.GetRegistry(cli.RegistryUrl)
+	rd, err := dist.GetRegistry(cli.RegistryURL)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "could not get registry: %v\n", err)
 		os.Exit(1)
 	}
-	abin, err := rd.GetBinaryForAgent(cli.requestedAgent)
+	d, err := dist.Resolve(rd, cli.requestedAgent.AcpID, dist.CurrentPlatform(), nil)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "binary doesn't exist for agent %s: %v\n", cli.Agent, err)
+		fmt.Fprintf(os.Stderr, "distribution doesn't exist for agent %s: %v\n", cli.Agent, err)
 		os.Exit(1)
 	}
-	opt := cloudinit.CloudConfigOpts{
+	cc, err := cloudinit.Build(cloudinit.Options{
 		User:           cli.User,
-		Agent:          abin,
+		Agent:          cli.requestedAgent,
+		Dist:           d,
 		AuthorizedKeys: cli.SSHKeys(),
 		ExtraPackages:  cli.ExtraPackages,
 		ConfigData:     cli.Config(),
 		SecretsData:    cli.Secrets(),
 		ShareData:      cli.ShareData,
-	}
-	cc, err := cloudinit.BuildCloudConfig(opt)
+	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
-	userData, err := cloudinit.MarshalCloudConfig(*cc)
+	userData, err := cloudinit.Marshal(cc)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Could not marshal cloud config: %v\n", err)
+		fmt.Fprintf(os.Stderr, "could not marshal cloud config: %v\n", err)
 		os.Exit(1)
 	}
 	if err := os.WriteFile(cli.Output, []byte(userData), 0644); err != nil {
-		fmt.Fprintf(os.Stderr, "Could not write cloud-init user-data to disk: %v\n", err)
+		fmt.Fprintf(os.Stderr, "could not write cloud-init user-data to disk: %v\n", err)
 		os.Exit(1)
 	}
 	fmt.Printf("Successfully wrote to %s\n", cli.Output)
-
 }

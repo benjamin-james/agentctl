@@ -6,62 +6,11 @@ import (
 	"testing"
 )
 
-func TestValidName(t *testing.T) {
-	tests := []struct {
-		input string
-		want  bool
-	}{
-		{"a", true},
-		{"abc", true},
-		{"A", true},
-		{"a1", true},
-		{"a-b", true},
-		{"a_b", true},
-		{"a.b", true},
-		{"Agent01", true},
-		{"", false},
-		{"1abc", false},
-		{"-abc", false},
-		{"_abc", false},
-		{".abc", false},
-		{"a b", false},
-		{"ab!", false},
-		{"ab@cd", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			if got := validName(tt.input, 32); got != tt.want {
-				t.Errorf("validName(%q) = %v, want %v", tt.input, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestValidNameLength(t *testing.T) {
-	long63 := make([]byte, 32)
-	for i := range long63 {
-		long63[i] = 'a'
-	}
-	if !validName(string(long63), 32) {
-		t.Error("validName should accept 32-char string")
-	}
-
-	long64 := make([]byte, 33)
-	for i := range long64 {
-		long64[i] = 'a'
-	}
-	if validName(string(long64), 32) {
-		t.Error("validName should reject 33-char string")
-	}
-}
-
 func TestResolveSSHKeys_StringOnly(t *testing.T) {
 	cli := &CLI{
 		SSHKeyString: []string{"ssh-rsa AAAA test@example.com"},
 	}
-	err := cli.resolveSSHKeys()
-	if err != nil {
+	if err := cli.resolveSSHKeys(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(cli.sshKeys) != 1 || cli.sshKeys[0] != "ssh-rsa AAAA test@example.com" {
@@ -76,13 +25,11 @@ func TestResolveSSHKeys_FileBased(t *testing.T) {
 	if err := os.WriteFile(keyFile, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
-
 	cli := &CLI{
 		SSHKey:       []string{keyFile},
 		SSHKeyString: []string{},
 	}
-	err := cli.resolveSSHKeys()
-	if err != nil {
+	if err := cli.resolveSSHKeys(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(cli.sshKeys) != 1 || cli.sshKeys[0] != "ssh-ed2552 AAAA user@host" {
@@ -95,8 +42,7 @@ func TestResolveSSHKeys_FileNotFound(t *testing.T) {
 		SSHKey:       []string{"/nonexistent/key.pub"},
 		SSHKeyString: nil,
 	}
-	err := cli.resolveSSHKeys()
-	if err == nil {
+	if err := cli.resolveSSHKeys(); err == nil {
 		t.Fatal("expected error for nonexistent file")
 	}
 }
@@ -106,8 +52,7 @@ func TestResolveSSHKeys_NoKeys(t *testing.T) {
 		SSHKey:       nil,
 		SSHKeyString: nil,
 	}
-	err := cli.resolveSSHKeys()
-	if err == nil {
+	if err := cli.resolveSSHKeys(); err == nil {
 		t.Fatal("expected error when no keys provided")
 	}
 }
@@ -118,13 +63,11 @@ func TestResolveSSHKeys_Mixed(t *testing.T) {
 	if err := os.WriteFile(keyFile, []byte("ssh-rsa FILEKEY f@h\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-
 	cli := &CLI{
 		SSHKey:       []string{keyFile},
 		SSHKeyString: []string{"ssh-rsa STRINGKEY s@h"},
 	}
-	err := cli.resolveSSHKeys()
-	if err != nil {
+	if err := cli.resolveSSHKeys(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(cli.sshKeys) != 2 {
@@ -146,8 +89,7 @@ func TestValidate_UnsupportedAgent(t *testing.T) {
 		User:         "agent",
 		SSHKeyString: []string{"ssh-rsa AAAA t@t"},
 	}
-	err := cli.Validate()
-	if err == nil {
+	if err := cli.Validate(); err == nil {
 		t.Fatal("expected error for unsupported agent")
 	}
 }
@@ -158,8 +100,7 @@ func TestValidate_InvalidUser(t *testing.T) {
 		User:         "1badname",
 		SSHKeyString: []string{"ssh-rsa AAAA t@t"},
 	}
-	err := cli.Validate()
-	if err == nil {
+	if err := cli.Validate(); err == nil {
 		t.Fatal("expected error for invalid username")
 	}
 }
@@ -174,8 +115,7 @@ func TestValidate_UserTooLong(t *testing.T) {
 		User:         longName,
 		SSHKeyString: []string{"ssh-rsa AAAA t@t"},
 	}
-	err := cli.Validate()
-	if err == nil {
+	if err := cli.Validate(); err == nil {
 		t.Fatal("expected error for too-long username")
 	}
 }
@@ -188,8 +128,7 @@ func TestValidate_MissingSecretsForCodex(t *testing.T) {
 		User:         "agent",
 		SSHKeyString: []string{"ssh-rsa AAAA t@t"},
 	}
-	err := cli.Validate()
-	if err == nil {
+	if err := cli.Validate(); err == nil {
 		t.Fatal("expected error: codex requires secrets")
 	}
 }
@@ -212,8 +151,7 @@ func TestValidate_SecretsNotAcceptedForOpenCode(t *testing.T) {
 		ConfigFile:   cfgFile,
 		SSHKeyString: []string{"ssh-rsa AAAA t@t"},
 	}
-	err := cli.Validate()
-	if err == nil {
+	if err := cli.Validate(); err == nil {
 		t.Fatal("expected error: opencode doesn't accept secrets")
 	}
 }
@@ -226,8 +164,7 @@ func TestValidate_MissingConfigForOpenCode(t *testing.T) {
 		User:         "agent",
 		SSHKeyString: []string{"ssh-rsa AAAA t@t"},
 	}
-	err := cli.Validate()
-	if err == nil {
+	if err := cli.Validate(); err == nil {
 		t.Fatal("expected error: opencode requires config")
 	}
 }
@@ -240,8 +177,7 @@ func TestValidate_MissingConfigForGoose(t *testing.T) {
 		User:         "agent",
 		SSHKeyString: []string{"ssh-rsa AAAA t@t"},
 	}
-	err := cli.Validate()
-	if err == nil {
+	if err := cli.Validate(); err == nil {
 		t.Fatal("expected error: goose requires config")
 	}
 }
@@ -253,9 +189,47 @@ func TestValidate_OutputDirNotWritable(t *testing.T) {
 		User:         "agent",
 		SSHKeyString: []string{"ssh-rsa AAAA t@t"},
 	}
-	err := cli.Validate()
-	if err == nil {
+	if err := cli.Validate(); err == nil {
 		t.Fatal("expected error for non-writable output dir")
+	}
+}
+
+func TestValidate_BadRegistryURL(t *testing.T) {
+	dir := t.TempDir()
+	cli := &CLI{
+		Agent:        "codex",
+		Output:       filepath.Join(dir, "output"),
+		User:         "agent",
+		RegistryURL:  "ftp://bad",
+		SSHKeyString: []string{"ssh-rsa AAAA t@t"},
+	}
+	if err := cli.Validate(); err == nil {
+		t.Fatal("expected error for non-https registry URL")
+	}
+}
+
+func TestValidate_SuccessCodex(t *testing.T) {
+	dir := t.TempDir()
+	secFile := filepath.Join(dir, "auth.json")
+	if err := os.WriteFile(secFile, []byte(`{"token":"x"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cli := &CLI{
+		Agent:        "codex",
+		Output:       filepath.Join(dir, "output"),
+		User:         "agent",
+		RegistryURL:  "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json",
+		SecretsFile:  secFile,
+		SSHKeyString: []string{"ssh-rsa AAAA t@t"},
+	}
+	if err := cli.Validate(); err != nil {
+		t.Fatalf("expected success, got: %v", err)
+	}
+	if cli.RequestedAgent().AcpID != "codex-acp" {
+		t.Errorf("RequestedAgent AcpID = %q", cli.RequestedAgent().AcpID)
+	}
+	if cli.Secrets() != `{"token":"x"}` {
+		t.Errorf("Secrets = %q", cli.Secrets())
 	}
 }
 
