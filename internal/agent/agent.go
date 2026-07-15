@@ -34,6 +34,13 @@ var supportedAgents = map[string]Agent{
 		AcpConfigRequired:  true,
 		AcpSecretsRequired: false,
 	},
+	"pi": {
+		AcpID:              "pi-acp",
+		AcpConfig:          "$HOME/.pi/agent/settings.json",
+		AcpSecrets:         "$HOME/.pi/agent/auth.json",
+		AcpConfigRequired:  true,
+		AcpSecretsRequired: false,
+	},
 }
 
 // wrapper on the supportedAgents map
