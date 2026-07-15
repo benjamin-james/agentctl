@@ -5,7 +5,7 @@ import (
 )
 
 func TestSupportedAgentsContainsExpectedAgents(t *testing.T) {
-	want := map[string]bool{"codex": true, "opencode": true, "goose": true}
+	want := map[string]bool{"codex": true, "opencode": true, "goose": true, "pi": true}
 	for _, name := range AgentNames() {
 		if !want[name] {
 			t.Errorf("unexpected agent %q", name)
@@ -18,8 +18,8 @@ func TestSupportedAgentsContainsExpectedAgents(t *testing.T) {
 }
 
 func TestSupportedAgentsCount(t *testing.T) {
-	if got := len(AgentNames()); got != 3 {
-		t.Errorf("len(AgentNames()) = %d, want 3", got)
+	if got := len(AgentNames()); got != 4 {
+		t.Errorf("len(AgentNames()) = %d, want 4", got)
 	}
 }
 
