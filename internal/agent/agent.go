@@ -1,4 +1,8 @@
+// Catalog of supported agents mapping their ACP
+// registry to config/secrets
 package agent
+
+import "sort"
 
 type Agent struct {
 	AcpID              string
@@ -8,7 +12,7 @@ type Agent struct {
 	AcpSecretsRequired bool
 }
 
-var supportedAgents map[string]Agent = map[string]Agent{
+var supportedAgents = map[string]Agent{
 	"codex": {
 		AcpID:              "codex-acp",
 		AcpConfig:          "$HOME/.codex/config.toml",
@@ -32,6 +36,7 @@ var supportedAgents map[string]Agent = map[string]Agent{
 	},
 }
 
+// wrapper on the supportedAgents map
 func GetAgent(name string) (Agent, bool) {
 	a, ok := supportedAgents[name]
 	return a, ok
@@ -42,5 +47,7 @@ func AgentNames() []string {
 	for k := range supportedAgents {
 		names = append(names, k)
 	}
+	// sort for deterministic ordering
+	sort.Strings(names)
 	return names
 }
