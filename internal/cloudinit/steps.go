@@ -14,6 +14,7 @@ var basePackageList = []string{
 	"qemu-guest-agent", "ca-certificates", "wget", "libnss-mdns",
 	"bzip2", "libcap2", "zlib1g", "libssl-dev", "libgcc-s1", "libgomp1",
 	"libzstd1", "rsync",
+	"bubblewrap", "build-essential", "python3-pip", "pipx", "tmux",
 }
 
 // install debian packages. TODO consider in the future adding
