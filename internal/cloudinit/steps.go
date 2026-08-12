@@ -13,7 +13,7 @@ import (
 var basePackageList = []string{
 	"qemu-guest-agent", "ca-certificates", "wget", "libnss-mdns",
 	"bzip2", "libcap2", "zlib1g", "libssl-dev", "libgcc-s1", "libgomp1",
-	"libzstd1", "rsync",
+	"libzstd1", "rsync", "docker.io", "docker-compose", "direnv",
 	"bubblewrap", "build-essential", "python3-pip", "pipx", "tmux",
 }
 
@@ -39,7 +39,7 @@ func UserStep(user string, keys []string) Step {
 			Shell:          "/bin/bash",
 			HomeDir:        fmt.Sprintf("/home/%s", user),
 			NoCreateHome:   false,
-			Groups:         []string{"sudo"},
+			Groups:         []string{"sudo", "docker"},
 			Sudo:           []string{"ALL=(ALL) NOPASSWD:ALL"},
 			AuthorizedKeys: keys,
 			LockPasswd:     len(keys) > 0,
@@ -89,6 +89,20 @@ func DataDirStep(user string, share bool) Step {
 			}}
 		}
 		ci.RunCmd = append(ci.RunCmd, fmt.Sprintf("chown -R \"%s\":\"%s\" /data", user, user))
+		return nil
+	}
+}
+
+// Runs pipx ensurepath and pipx install uv as the non-root user so that
+// pipx-managed tools land in the user's ~/.local and are on their PATH.
+// `su -` is used so the login shell sets HOME and sources the user's rc files,
+// which matters for pipx writing to the correct location.
+func PipxStep(user string) Step {
+	return func(ci *CloudConfig) error {
+		ci.RunCmd = append(ci.RunCmd,
+			fmt.Sprintf("su - %s -c 'pipx ensurepath'", user),
+			fmt.Sprintf("su - %s -c 'pipx install uv'", user),
+		)
 		return nil
 	}
 }

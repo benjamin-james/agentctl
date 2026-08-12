@@ -63,8 +63,9 @@ type Step func(*CloudConfig) error
 // (2) User
 // (3) ACP
 // (4) DataDir (optional)
-// (5) StageConfig: config file
-// (6) StageSecrets: secrets file
+// (5) Pipx: ensurepath and install uv as the non-root user
+// (6) StageConfig: config file
+// (7) StageSecrets: secrets file
 // This makes the runcmd and files explicit
 func Build(opts Options) (*CloudConfig, error) {
 	if err := dist.CheckUsername(opts.User); err != nil {
@@ -79,6 +80,7 @@ func Build(opts Options) (*CloudConfig, error) {
 		UserStep(opts.User, opts.AuthorizedKeys),
 		ACPStep(opts.Dist),
 		DataDirStep(opts.User, opts.ShareData),
+		PipxStep(opts.User),
 	}
 	if opts.ConfigData != "" && opts.Agent.AcpConfig != "" {
 		steps = append(steps, StageConfig(opts.Agent.AcpConfig, opts.ConfigData, opts.User))

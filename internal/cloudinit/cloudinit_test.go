@@ -231,6 +231,27 @@ func TestDataDirStepWithShare(t *testing.T) {
 	}
 }
 
+func TestPipxStep(t *testing.T) {
+	ci := &CloudConfig{}
+	if err := PipxStep("agent")(ci); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []string{
+		"su - agent -c 'pipx ensurepath'",
+		"su - agent -c 'pipx install uv'",
+	}
+	for i, w := range want {
+		idx := indexOf(ci.RunCmd, w)
+		if idx < 0 {
+			t.Errorf("runcmd missing %q: %v", w, ci.RunCmd)
+			continue
+		}
+		if i > 0 && idx < indexOf(ci.RunCmd, want[i-1]) {
+			t.Errorf("runcmd order wrong: %q before %q: %v", w, want[i-1], ci.RunCmd)
+		}
+	}
+}
+
 func TestStageConfig(t *testing.T) {
 	ci := &CloudConfig{}
 	if err := StageConfig("$HOME/.codex/config.toml", "CONFIGDATA", "agent")(ci); err != nil {
