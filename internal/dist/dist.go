@@ -86,7 +86,8 @@ func (b Binary) Validate() error {
 	return nil
 }
 
-func (Binary) Packages() []string { return nil }
+// wget needed to download binaries
+func (Binary) Packages() []string { return []string{"wget"} }
 
 func (b Binary) Installer() (string, error) {
 	if err := b.Validate(); err != nil {

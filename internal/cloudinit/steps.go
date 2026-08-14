@@ -11,10 +11,9 @@ import (
 
 // List of shared packages expected to be used.
 var basePackageList = []string{
-	"qemu-guest-agent", "ca-certificates", "wget", "libnss-mdns",
+	"qemu-guest-agent", "ca-certificates", "libnss-mdns",
 	"bzip2", "libcap2", "zlib1g", "libssl-dev", "libgcc-s1", "libgomp1",
-	"libzstd1", "rsync", "docker.io", "docker-compose", "direnv",
-	"bubblewrap", "build-essential", "python3-pip", "pipx", "tmux",
+	"libzstd1", "rsync", "python3-pip", "pipx", "bubblewrap",
 }
 
 // install debian packages. TODO consider in the future adding

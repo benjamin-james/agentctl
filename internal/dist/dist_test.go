@@ -102,8 +102,9 @@ func TestBinaryValidateEmptySHA256Ok(t *testing.T) {
 }
 
 func TestBinaryPackages(t *testing.T) {
-	if p := (Binary{}).Packages(); p != nil {
-		t.Errorf("Binary.Packages() = %v, want nil", p)
+	p := (Binary{}).Packages()
+	if len(p) != 1 || p[0] != "wget" {
+		t.Errorf("Binary.Packages() = %v, want [wget]", p)
 	}
 }
 
