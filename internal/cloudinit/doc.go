@@ -16,6 +16,7 @@ import (
 type CloudConfig struct {
 	PackageUpdate bool        `yaml:"package_update"`
 	Packages      []string    `yaml:"packages"`
+	Locale        string      `yaml:"locale,omitempty"`
 	Users         []User      `yaml:"users"`
 	WriteFiles    []WriteFile `yaml:"write_files"`
 	RunCmd        []string    `yaml:"runcmd"`
@@ -59,7 +60,7 @@ type Options struct {
 type Step func(*CloudConfig) error
 
 // Builds each step incrementally by applying steps in the correct order
-// (1) Base packages
+// (1) Base packages & locale
 // (2) User
 // (3) ACP
 // (4) DataDir (optional)
@@ -77,6 +78,7 @@ func Build(opts Options) (*CloudConfig, error) {
 	ci := &CloudConfig{PackageUpdate: true}
 	steps := []Step{
 		BasePackages(opts.ExtraPackages, opts.Dist),
+		LocaleStep("en_US.UTF-8"),
 		UserStep(opts.User, opts.AuthorizedKeys),
 		ACPStep(opts.Dist),
 		DataDirStep(opts.User, opts.ShareData),

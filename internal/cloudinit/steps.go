@@ -147,3 +147,10 @@ func InstallToDir(dst, src, user, group string, dirPerm, filePerm int) []string 
 	slices.Reverse(cmds)
 	return cmds
 }
+
+func LocaleStep(locale string) Step {
+	return func(ci *CloudConfig) error {
+		ci.Locale = locale
+		return nil
+	}
+}

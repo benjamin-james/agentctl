@@ -69,6 +69,16 @@ func TestBasePackagesNpxAddsNodePackages(t *testing.T) {
 	}
 }
 
+func TestLocaleStep(t *testing.T) {
+	ci := &CloudConfig{}
+	if err := LocaleStep("en_US.UTF-8")(ci); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ci.Locale != "en_US.UTF-8" {
+		t.Errorf("Locale = %q, want en_US.UTF-8", ci.Locale)
+	}
+}
+
 func TestUserStep(t *testing.T) {
 	ci := &CloudConfig{}
 	keys := []string{"ssh-rsa AAA key"}
@@ -337,6 +347,9 @@ func TestBuildBinaryIntegration(t *testing.T) {
 	if !cc.PackageUpdate {
 		t.Error("PackageUpdate should be true")
 	}
+	if cc.Locale != "en_US.UTF-8" {
+		t.Errorf("Locale = %q, want en_US.UTF-8", cc.Locale)
+	}
 	if !contains(cc.Packages, "rsync") {
 		t.Errorf("packages missing rsync: %v", cc.Packages)
 	}
@@ -373,6 +386,9 @@ func TestBuildNpxIntegration(t *testing.T) {
 	cc, err := Build(opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if cc.Locale != "en_US.UTF-8" {
+		t.Errorf("Locale = %q, want en_US.UTF-8", cc.Locale)
 	}
 	if !contains(cc.Packages, "nodejs") || !contains(cc.Packages, "npm") {
 		t.Errorf("npx build should add nodejs/npm: %v", cc.Packages)
