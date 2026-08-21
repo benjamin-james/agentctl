@@ -1,8 +1,8 @@
 name: Release
 
 # Builds agentctl for linux-x86_64 and linux-aarch64 on every push to main,
-# then publishes a rolling "latest" prerelease with tarballs and a
-# CHECKSUMS file.
+# then publishes a semver prerelease (v0.1.N) with tarballs and a CHECKSUMS
+# file. The patch number auto-increments by scanning existing git tags.
 
 on:
   push:
@@ -45,7 +45,7 @@ jobs:
           retention-days: 1
 
   release:
-    name: Publish rolling release
+    name: Publish prerelease
     needs: build
     runs-on: ubuntu-latest
     steps:
@@ -61,19 +61,40 @@ jobs:
           echo "=== CHECKSUMS ==="
           cat ../CHECKSUMS
 
-      - name: Delete previous rolling release
-        run: |
-          gh release delete latest --yes --cleanup-tag || true
+      - name: Compute next version
+        id: version
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Fetch all tags, find the highest vMAJOR.MINOR.PATCH, increment patch.
+          # If no tags exist, start at v0.1.0.
+          latest=$(gh api repos/${{ github.repository }}/tags \
+            --paginate \
+            --jq '.[].name' \
+            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+            | sort -V \
+            | tail -1 \
+            || true)
+          if [ -z "$latest" ]; then
+            version="v0.1.0"
+          else
+            major=$(echo "$latest" | cut -d. -f1 | tr -d 'v')
+            minor=$(echo "$latest" | cut -d. -f2)
+            patch=$(echo "$latest" | cut -d. -f3)
+            patch=$((patch + 1))
+            version="v${major}.${minor}.${patch}"
+          fi
+          echo "Latest tag: ${latest:-none}"
+          echo "Next version: $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
-      - name: Create rolling release
+      - name: Create prerelease
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: latest
-          name: Latest (main)
+          tag_name: ${{ steps.version.outputs.version }}
+          name: Build ${{ steps.version.outputs.version }}
           body: |
-            Rolling build from `${{ github.sha }}` on `${{ github.ref_name }}`.
+            Build from `${{ github.sha }}` on `${{ github.ref_name }}`.
 
             ## Tarballs
 
