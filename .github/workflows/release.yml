@@ -1,7 +1,7 @@
 name: Release
 
 # Builds agentctl for linux-x86_64 and linux-aarch64 on every push to main,
-# then publishes a rolling "latest" prerelease with the binaries and a
+# then publishes a rolling "latest" prerelease with tarballs and a
 # CHECKSUMS file.
 
 on:
@@ -35,12 +35,13 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
         run: |
-          go build -trimpath -ldflags="-s -w" -o agentctl-linux-${{ matrix.arch }} .
+          go build -trimpath -ldflags="-s -w" -o agentctl .
+          tar -czf agentctl-linux-${{ matrix.arch }}.tar.gz agentctl
 
       - uses: actions/upload-artifact@v4
         with:
           name: agentctl-linux-${{ matrix.arch }}
-          path: agentctl-linux-${{ matrix.arch }}
+          path: agentctl-linux-${{ matrix.arch }}.tar.gz
           retention-days: 1
 
   release:
@@ -56,7 +57,7 @@ jobs:
       - name: Build CHECKSUMS
         run: |
           cd artifacts
-          sha256sum agentctl-linux-* > ../CHECKSUMS
+          sha256sum agentctl-linux-*.tar.gz > ../CHECKSUMS
           echo "=== CHECKSUMS ==="
           cat ../CHECKSUMS
 
@@ -74,14 +75,14 @@ jobs:
           body: |
             Rolling build from `${{ github.sha }}` on `${{ github.ref_name }}`.
 
-            ## Binaries
+            ## Tarballs
 
             | File | Arch |
             |------|------|
-            | `agentctl-linux-x86_64` | x86_64 |
-            | `agentctl-linux-aarch64` | aarch64 |
+            | `agentctl-linux-x86_64.tar.gz` | x86_64 |
+            | `agentctl-linux-aarch64.tar.gz` | aarch64 |
           prerelease: true
           files: |
-            artifacts/agentctl-linux-x86_64
-            artifacts/agentctl-linux-aarch64
+            artifacts/agentctl-linux-x86_64.tar.gz
+            artifacts/agentctl-linux-aarch64.tar.gz
             CHECKSUMS
