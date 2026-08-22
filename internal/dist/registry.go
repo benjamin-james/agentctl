@@ -71,6 +71,38 @@ func (f GitHubAPIFetcher) FetchSHA256(archiveURL string) (string, error) {
 	return f.fetchFromRelease(apiURL, archiveURL)
 }
 
+// Uses gh api to find most recent release and returns the download URL and
+// sha256 for the asset whose name matches assetName.
+func (f GitHubAPIFetcher) FetchLatestAsset(owner, repo, assetName string) (string, string, error) {
+	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases?per_page=1", owner, repo)
+
+	releases, err := f.fetchReleases(apiURL)
+	if err != nil {
+		return "", "", err
+	}
+	return fetchLatestFromReleases(releases, assetName)
+}
+
+// Get download URL and SHA256 for assetName for the first (newest) release
+// that works
+func fetchLatestFromReleases(releases []gitHubRelease, assetName string) (string, string, error) {
+	if len(releases) == 0 {
+		return "", "", fmt.Errorf("no releases found")
+	}
+	release := &releases[0]
+	for i := range release.Assets {
+		asset := &release.Assets[i]
+		if asset.Name == assetName {
+			sha, err := parseDigest(*asset)
+			if err != nil {
+				return "", "", err
+			}
+			return asset.BrowserDownloadURL, sha, nil
+		}
+	}
+	return "", "", fmt.Errorf("asset %q not found in latest release", assetName)
+}
+
 // resolves release-download URI into release-by-tag API URL.
 func resolveGitHubAPIURL(archiveURL string) (string, bool) {
 	m := gitHubReleaseRe.FindStringSubmatch(archiveURL)
@@ -79,6 +111,37 @@ func resolveGitHubAPIURL(archiveURL string) (string, bool) {
 	}
 	owner, repo, tag := m[1], m[2], m[3]
 	return fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/tags/%s", owner, repo, tag), true
+}
+
+// fetchReleases performs a GET request to apiURL and decodes the JSON
+// response as a slice of gitHubRelease.
+func (f GitHubAPIFetcher) fetchReleases(apiURL string) ([]gitHubRelease, error) {
+	req, err := http.NewRequest(http.MethodGet, apiURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating GitHub API request: %w", err)
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+
+	resp, err := f.http().Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetching GitHub release: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("GitHub API returned HTTP %d", resp.StatusCode)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxReleaseBody))
+	if err != nil {
+		return nil, fmt.Errorf("reading GitHub API response: %w", err)
+	}
+
+	var releases []gitHubRelease
+	if err := json.Unmarshal(data, &releases); err != nil {
+		return nil, fmt.Errorf("parsing GitHub API response: %w", err)
+	}
+	return releases, nil
 }
 
 // Given an API URL, return the digest for the asset matching the URL.

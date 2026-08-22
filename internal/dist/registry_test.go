@@ -311,6 +311,125 @@ func TestFetchSHA256FromReleaseHTTPError(t *testing.T) {
 	}
 }
 
+// GitHubAPIFetcher.FetchLatestAsset
+
+func TestFetchLatestAssetSuccess(t *testing.T) {
+	downloadURL := "https://github.com/owner/repo/releases/download/v0.0.42/agentctl-linux-x86_64.tar.gz"
+	hash := strings.Repeat("a", 64)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		releases := []gitHubRelease{{
+			Assets: []gitHubAsset{
+				{Name: "CHECKSUMS", BrowserDownloadURL: "https://github.com/owner/repo/releases/download/v0.0.42/CHECKSUMS", Digest: ""},
+				{Name: "agentctl-linux-x86_64.tar.gz", BrowserDownloadURL: downloadURL, Digest: "sha256:" + hash},
+			},
+		}}
+		_ = json.NewEncoder(w).Encode(releases)
+	}))
+	defer srv.Close()
+
+	f := GitHubAPIFetcher{}
+	releases, err := f.fetchReleases(srv.URL)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(releases) != 1 {
+		t.Fatalf("expected 1 release, got %d", len(releases))
+	}
+	url, sha, err := fetchLatestFromReleases(releases, "agentctl-linux-x86_64.tar.gz")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if url != downloadURL {
+		t.Errorf("download URL = %q, want %q", url, downloadURL)
+	}
+	if sha != hash {
+		t.Errorf("sha256 = %q, want %q", sha, hash)
+	}
+}
+
+func TestFetchLatestAssetNoReleases(t *testing.T) {
+	if _, _, err := fetchLatestFromReleases(nil, "x"); err == nil {
+		t.Fatal("expected error for no releases")
+	}
+}
+
+func TestFetchLatestAssetNoMatchingAsset(t *testing.T) {
+	releases := []gitHubRelease{{
+		Assets: []gitHubAsset{
+			{Name: "other.tar.gz", BrowserDownloadURL: "https://github.com/owner/repo/releases/download/v0.0.42/other.tar.gz", Digest: "sha256:" + strings.Repeat("c", 64)},
+		},
+	}}
+	if _, _, err := fetchLatestFromReleases(releases, "agentctl-linux-x86_64.tar.gz"); err == nil {
+		t.Fatal("expected error for no matching asset")
+	}
+}
+
+func TestFetchLatestAssetHTTPError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	f := GitHubAPIFetcher{}
+	if _, err := f.fetchReleases(srv.URL); err == nil {
+		t.Fatal("expected error for HTTP 404")
+	}
+}
+
+func TestFetchLatestAssetBadDigestFormat(t *testing.T) {
+	releases := []gitHubRelease{{
+		Assets: []gitHubAsset{
+			{Name: "agentctl-linux-x86_64.tar.gz", BrowserDownloadURL: "https://github.com/owner/repo/releases/download/v0.0.42/agentctl-linux-x86_64.tar.gz", Digest: "md5:abc"},
+		},
+	}}
+	if _, _, err := fetchLatestFromReleases(releases, "agentctl-linux-x86_64.tar.gz"); err == nil {
+		t.Fatal("expected error for bad digest format")
+	}
+}
+
+func TestFetchLatestAssetPicksFirstRelease(t *testing.T) {
+	// The API returns newest-first; verify we pick the first one.
+	newURL := "https://github.com/owner/repo/releases/download/v0.0.43/agentctl-linux-x86_64.tar.gz"
+	oldURL := "https://github.com/owner/repo/releases/download/v0.0.42/agentctl-linux-x86_64.tar.gz"
+	releases := []gitHubRelease{
+		{Assets: []gitHubAsset{
+			{Name: "agentctl-linux-x86_64.tar.gz", BrowserDownloadURL: newURL, Digest: "sha256:" + strings.Repeat("a", 64)},
+		}},
+		{Assets: []gitHubAsset{
+			{Name: "agentctl-linux-x86_64.tar.gz", BrowserDownloadURL: oldURL, Digest: "sha256:" + strings.Repeat("b", 64)},
+		}},
+	}
+	url, sha, err := fetchLatestFromReleases(releases, "agentctl-linux-x86_64.tar.gz")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if url != newURL {
+		t.Errorf("download URL = %q, want %q (newest)", url, newURL)
+	}
+	if sha != strings.Repeat("a", 64) {
+		t.Errorf("sha256 = %q, want newest digest", sha)
+	}
+}
+
+func TestFetchLatestAssetEmptyDigest(t *testing.T) {
+	downloadURL := "https://github.com/owner/repo/releases/download/v0.0.42/agentctl-linux-x86_64.tar.gz"
+	releases := []gitHubRelease{{
+		Assets: []gitHubAsset{
+			{Name: "agentctl-linux-x86_64.tar.gz", BrowserDownloadURL: downloadURL, Digest: ""},
+		},
+	}}
+	url, sha, err := fetchLatestFromReleases(releases, "agentctl-linux-x86_64.tar.gz")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if url != downloadURL {
+		t.Errorf("download URL = %q, want %q", url, downloadURL)
+	}
+	if sha != "" {
+		t.Errorf("expected empty digest, got %q", sha)
+	}
+}
+
 // --- GetRegistry ---
 
 func TestGetRegistrySuccess(t *testing.T) {
