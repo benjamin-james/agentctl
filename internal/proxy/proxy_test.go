@@ -114,7 +114,7 @@ func TestEchoRoundTrip(t *testing.T) {
 	socket, _ := startProxy(t, fakeAgent(t, "echo"))
 
 	conn := dialRetry(t, socket)
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	cr := newConnReader(conn)
 
 	writeLine(t, conn, "ping")
@@ -132,13 +132,13 @@ func TestEvictionClosesPreviousClient(t *testing.T) {
 	socket, _ := startProxy(t, fakeAgent(t, "echo"))
 
 	c1 := dialRetry(t, socket)
-	defer c1.Close()
+	defer func() { _ = c1.Close() }()
 	cr1 := newConnReader(c1)
 	writeLine(t, c1, "first")
 	_ = readLine(t, cr1, 3*time.Second) // confirm c1 is attached
 
 	c2 := dialRetry(t, socket)
-	defer c2.Close()
+	defer func() { _ = c2.Close() }()
 	cr2 := newConnReader(c2)
 
 	// c1 should now be evicted: reading should return EOF or error.
@@ -164,14 +164,14 @@ func TestDisconnectKeepsAgentAlive(t *testing.T) {
 	cr1 := newConnReader(c1)
 	writeLine(t, c1, "first")
 	_ = readLine(t, cr1, 3*time.Second)
-	c1.Close()
+	_ = c1.Close()
 
 	// Give the pump time to notice the disconnect and set current=nil.
 	time.Sleep(200 * time.Millisecond)
 
 	// A new client should still be able to talk to the same agent process.
 	c2 := dialRetry(t, socket)
-	defer c2.Close()
+	defer func() { _ = c2.Close() }()
 	cr2 := newConnReader(c2)
 	writeLine(t, c2, "second")
 	if got := readLine(t, cr2, 3*time.Second); got != "second" {
@@ -189,7 +189,7 @@ func TestBackpressureDeliversDelayedOutput(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 
 	c := dialRetry(t, socket)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	cr := newConnReader(c)
 
 	// Ensure the hello lines were received
@@ -278,7 +278,7 @@ func TestSequentialLines(t *testing.T) {
 	socket, _ := startProxy(t, fakeAgent(t, "echo"))
 
 	c := dialRetry(t, socket)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	cr := newConnReader(c)
 
 	const n = 20
@@ -296,7 +296,7 @@ func TestBurstWrite(t *testing.T) {
 	socket, _ := startProxy(t, fakeAgent(t, "echo"))
 
 	c := dialRetry(t, socket)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	cr := newConnReader(c)
 
 	const n = 10
@@ -341,7 +341,7 @@ done
 
 	socket, _ := startProxy(t, agentPath)
 	c := dialRetry(t, socket)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	cr := newConnReader(c)
 
 	writeLine(t, c, "test")
@@ -361,7 +361,7 @@ func TestMultipleEvictionsInSequence(t *testing.T) {
 		if got := readLine(t, cr, 3*time.Second); got != msg {
 			t.Errorf("iter %d: got %q, want %q", i, got, msg)
 		}
-		c.Close()
+		_ = c.Close()
 		time.Sleep(50 * time.Millisecond)
 	}
 }
@@ -396,7 +396,7 @@ func TestSocketPathRemovedBeforeListen(t *testing.T) {
 
 	socket, _ = startProxyReuseDir(t, dir, fakeAgent(t, "echo"))
 	c := dialRetry(t, socket)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	cr := newConnReader(c)
 	writeLine(t, c, "works")
 	if got := readLine(t, cr, 3*time.Second); got != "works" {
@@ -454,7 +454,7 @@ func TestNoGoroutineLeak(t *testing.T) {
 	cr := newConnReader(c)
 	writeLine(t, c, "ping")
 	_ = readLine(t, cr, 3*time.Second)
-	c.Close()
+	_ = c.Close()
 	cancel()
 	<-errCh
 
@@ -475,6 +475,6 @@ func goroutineCount(t *testing.T) int {
 	}
 	var label string
 	var n int
-	fmt.Sscanf(strings.TrimSpace(string(out)), "%s %d", &label, &n)
+	_, _ = fmt.Sscanf(strings.TrimSpace(string(out)), "%s %d", &label, &n)
 	return n
 }

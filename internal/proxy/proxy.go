@@ -131,14 +131,14 @@ func (p *Proxy) Run(ctx context.Context) error {
 
 	select {
 	case <-ctx.Done():
-		p.listener.Close()
+		_ = p.listener.Close()
 		_ = p.stdin.Close()
 		<-pumpDone
 		<-p.agentDone
 		_ = os.Remove(p.cfg.SocketPath)
 		return nil
 	case <-p.agentDone:
-		p.listener.Close()
+		_ = p.listener.Close()
 		<-pumpDone
 		_ = os.Remove(p.cfg.SocketPath)
 		return waitErr
@@ -200,7 +200,7 @@ func (p *Proxy) acceptLoop() {
 // pump, then runs the client to agent copy until the conn is closed (by client
 // disconnect, eviction, or agent exit).
 func (p *Proxy) handle(conn net.Conn) {
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	req := attachReq{conn: conn, done: make(chan struct{})}
 	select {
 	case p.attachCh <- req:
@@ -285,20 +285,20 @@ func (p *Proxy) pump(done chan<- struct{}) {
 		select {
 		case req := <-p.attachCh:
 			// Evict: close old conn, swap to new.
-			current.Close()
+			_ = current.Close()
 			current = req.conn
 			close(req.done)
 		case <-p.agentDone:
-			current.Close()
+			_ = current.Close()
 			return
 		case ch := <-agentCh:
 			if ch.err != nil {
-				current.Close()
+				_ = current.Close()
 				return
 			}
 			_ = current.SetWriteDeadline(time.Now().Add(writeTimeout))
 			if _, err := current.Write(ch.data); err != nil {
-				current.Close()
+				_ = current.Close()
 				current = nil
 			}
 		}
