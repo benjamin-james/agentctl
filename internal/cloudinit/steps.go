@@ -74,16 +74,10 @@ func DataDirStep(user string, share bool) Step {
 	return func(ci *CloudConfig) error {
 		ci.RunCmd = append(ci.RunCmd, "mkdir -p /data")
 		if share {
-			ci.WriteFiles = append(ci.WriteFiles, WriteFile{
-				Path:        "/etc/modules-load.d/9p.conf",
-				Permissions: "0644",
-				Owner:       "root:root",
-				Content:     "9p\n9pnet\n9pnet_virtio",
-			})
 			ci.RunCmd = append(ci.RunCmd, "systemctl daemon-reload", "systemctl enable --now data.automount")
 			ci.Mounts = [][]string{{
-				"share", "/data/", "9p",
-				"trans=virtio,version=9p2000.L,rw,_netdev,nofail,x-systemd.automount",
+				"share", "/data/", "virtiofs",
+				"rw,nofail,x-systemd.automount",
 				"0", "0",
 			}}
 		}
